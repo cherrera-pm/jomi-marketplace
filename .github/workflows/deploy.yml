@@ -15,34 +15,57 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Node (Vite 7 compatible)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
           cache: "npm"
 
-      - name: Install deps cleanly
+      - name: Install deps
         run: npm ci
 
       - name: Build
         run: npm run build
 
-      # Carga tu llave privada en el agente SSH
+      # Carga llave
       - name: Load SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # Confiar en la huella del host (known_hosts)
+      # Known hosts
       - name: Register known_hosts
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      # Deploy con rsync
+      # Muestra qué se va a subir (debug)
+      - name: Show local build fingerprint
+        run: |
+          echo "::group::LOCAL dist listing"
+          ls -lah dist
+          echo "::endgroup::"
+          echo "::group::LOCAL index.html head"
+          head -n 20 dist/index.html || true
+          echo "::endgroup::"
+
+      # Deploy: usa --checksum para forzar actualización si mtime/size no cambian
       - name: Rsync dist/ to server
         run: |
-          rsync -rltDzv --delete --omit-dir-times \
+          rsync -rltDzv --checksum --delete --omit-dir-times \
+            --chmod=Du=rwx,Fu=rw,go=rX \
             -e "ssh -p ${{ secrets.SSH_PORT || 22 }}" \
-            dist/ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}"
+            dist/ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      # Verifica contenido en el servidor (ruta exacta donde Nginx sirve)
+      - name: Verify remote content
+        run: |
+          ssh -p "${{ secrets.SSH_PORT || 22 }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" '
+            echo "== REMOTE listing =="
+            ls -lah "${{ secrets.DEPLOY_PATH }}" || true
+            echo "== REMOTE index.html head =="
+            head -n 20 "${{ secrets.DEPLOY_PATH }}/index.html" || true
+          '
