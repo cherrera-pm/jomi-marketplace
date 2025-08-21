@@ -1,1 +1,5 @@
-# jomi-marketplace
+rm -rf node_modules
+npm install
+npm run build
+npm run dev
+npm run dev -- --host
